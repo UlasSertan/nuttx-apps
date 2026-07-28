@@ -88,9 +88,8 @@ extern "C"
  *
  *   If a prompt string is used by the application, then the application
  *   must provide the prompt string to readline() by calling this function.
- *   This is needed for tab completion, and for line editing's full-line
- *   redraws (Home, End, history recall, ...), in cases where it is
- *   necessary to reprint the prompt string.
+ *   This is needed only for tab completion in cases where is it necessary
+ *   to reprint the prompt string.
  *
  * Input Parameters:
  *   prompt    - The prompt string. This function may then be
@@ -109,7 +108,7 @@ extern "C"
  *
  ****************************************************************************/
 
-#if defined(CONFIG_READLINE_TABCOMPLETION) || defined(CONFIG_READLINE_EDIT)
+#ifdef CONFIG_READLINE_TABCOMPLETION
 FAR const char *readline_prompt(FAR const char *prompt);
 #else
 #  define readline_prompt(p)

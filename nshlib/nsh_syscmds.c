@@ -405,7 +405,6 @@ int cmd_switchboot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 int cmd_boot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   struct boardioc_boot_info_s info;
-  FAR char *fullpath = NULL;
 
   memset(&info, 0, sizeof(info));
 
@@ -422,8 +421,7 @@ int cmd_boot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
         /* Go through */
 
       case 1:
-        fullpath = nsh_getfullpath(vtbl, argv[1]);
-        info.path = fullpath;
+        info.path = argv[1];
 
         /* Go through */
 
@@ -441,7 +439,6 @@ int cmd_boot(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
    */
 
   nsh_error(vtbl, g_fmtcmdfailed, argv[0], "boardctl", NSH_ERRNO);
-  nsh_freefullpath(fullpath);
   return ERROR;
 }
 #endif

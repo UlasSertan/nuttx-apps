@@ -43,11 +43,7 @@
  * Preprocessor Definitions
  ****************************************************************************/
 
-#define NRECTCOLORS 6
-#define NSMPTECOLORS 7
-
-#define PATTERN_RECTANGLES 0
-#define PATTERN_SMPTE      1
+#define NCOLORS 6
 
 /****************************************************************************
  * Private Types
@@ -75,49 +71,22 @@ static const char g_default_fbdev[] = CONFIG_EXAMPLES_FB_DEFAULTFB;
 
 /* Violet-Blue-Green-Yellow-Orange-Red */
 
-static const uint32_t g_rgb24[NRECTCOLORS] =
+static const uint32_t g_rgb24[NCOLORS] =
 {
   RGB24_VIOLET, RGB24_BLUE, RGB24_GREEN,
   RGB24_YELLOW, RGB24_ORANGE, RGB24_RED
 };
 
-static const uint16_t g_rgb16[NRECTCOLORS] =
+static const uint16_t g_rgb16[NCOLORS] =
 {
   RGB16_VIOLET, RGB16_BLUE, RGB16_GREEN,
   RGB16_YELLOW, RGB16_ORANGE, RGB16_RED
 };
 
-static const uint8_t g_rgb8[NRECTCOLORS] =
+static const uint8_t g_rgb8[NCOLORS] =
 {
   RGB8_VIOLET, RGB8_BLUE, RGB8_GREEN,
   RGB8_YELLOW, RGB8_ORANGE, RGB8_RED
-};
-
-/* White-Yellow-Cyan-Green-Magenta-Red-Blue */
-
-static const uint32_t g_smpte_rgb24[NSMPTECOLORS] =
-{
-  RGB24_WHITE, RGB24_YELLOW, RGB24_CYAN, RGB24_GREEN,
-  RGB24_MAGENTA, RGB24_RED, RGB24_BLUE
-};
-
-static const uint16_t g_smpte_rgb16[NSMPTECOLORS] =
-{
-  RGB16_WHITE, RGB16_YELLOW, RGB16_CYAN, RGB16_GREEN,
-  RGB16_MAGENTA, RGB16_RED, RGB16_BLUE
-};
-
-static const uint8_t g_smpte_rgb8[NSMPTECOLORS] =
-{
-  RGB8_WHITE, RGB8_YELLOW, RGB8_CYAN, RGB8_GREEN,
-  RGB8_MAGENTA, RGB8_RED, RGB8_BLUE
-};
-
-/* Monochrome equivalents selected using BT.601 luma. */
-
-static const uint8_t g_smpte_mono[NSMPTECOLORS] =
-{
-  1, 1, 1, 1, 0, 0, 0
 };
 
 /****************************************************************************
@@ -301,7 +270,7 @@ static int fb_init_mem2(FAR struct fb_state_s *state)
  ****************************************************************************/
 
 static void draw_rect32(FAR struct fb_state_s *state,
-                        FAR struct fb_area_s *area, uint32_t color)
+                        FAR struct fb_area_s *area, int color)
 {
   FAR uint32_t *dest;
   FAR uint8_t *row;
@@ -314,7 +283,7 @@ static void draw_rect32(FAR struct fb_state_s *state,
       dest = ((FAR uint32_t *)row) + area->x;
       for (x = 0; x < area->w; x++)
         {
-          *dest++ = color | 0xff000000;
+          *dest++ = g_rgb24[color] | 0xff000000;
         }
 
       row += state->pinfo.stride;
@@ -322,7 +291,7 @@ static void draw_rect32(FAR struct fb_state_s *state,
 }
 
 static void draw_rect24(FAR struct fb_state_s *state,
-                        FAR struct fb_area_s *area, uint32_t color)
+                        FAR struct fb_area_s *area, int color)
 {
   FAR uint8_t *dest;
   FAR uint8_t *row;
@@ -335,9 +304,9 @@ static void draw_rect24(FAR struct fb_state_s *state,
       dest = ((FAR uint8_t *)row) + area->x * 3;
       for (x = 0; x < area->w; x++)
         {
-          *dest++ = color & 0xff;
-          *dest++ = (color >> 8) & 0xff;
-          *dest++ = (color >> 16) & 0xff;
+          *dest++ = g_rgb24[color] & 0xff;
+          *dest++ = (g_rgb24[color] >> 8) & 0xff;
+          *dest++ = (g_rgb24[color] >> 16) & 0xff;
         }
 
       row += state->pinfo.stride;
@@ -345,7 +314,7 @@ static void draw_rect24(FAR struct fb_state_s *state,
 }
 
 static void draw_rect16(FAR struct fb_state_s *state,
-                        FAR struct fb_area_s *area, uint16_t color)
+                        FAR struct fb_area_s *area, int color)
 {
   FAR uint16_t *dest;
   FAR uint8_t *row;
@@ -358,7 +327,7 @@ static void draw_rect16(FAR struct fb_state_s *state,
       dest = ((FAR uint16_t *)row) + area->x;
       for (x = 0; x < area->w; x++)
         {
-          *dest++ = color;
+          *dest++ = g_rgb16[color];
         }
 
       row += state->pinfo.stride;
@@ -366,7 +335,7 @@ static void draw_rect16(FAR struct fb_state_s *state,
 }
 
 static void draw_rect8(FAR struct fb_state_s *state,
-                       FAR struct fb_area_s *area, uint8_t color)
+                       FAR struct fb_area_s *area, int color)
 {
   FAR uint8_t *dest;
   FAR uint8_t *row;
@@ -379,7 +348,7 @@ static void draw_rect8(FAR struct fb_state_s *state,
       dest = row + area->x;
       for (x = 0; x < area->w; x++)
         {
-          *dest++ = color;
+          *dest++ = g_rgb8[color];
         }
 
       row += state->pinfo.stride;
@@ -387,11 +356,11 @@ static void draw_rect8(FAR struct fb_state_s *state,
 }
 
 static void draw_rect1(FAR struct fb_state_s *state,
-                       FAR struct fb_area_s *area, uint8_t color)
+                       FAR struct fb_area_s *area, int color)
 {
   FAR uint8_t *pixel;
   FAR uint8_t *row;
-  uint8_t color8 = color == 0 ? 0 : 0xff;
+  uint8_t color8 = (color & 1) == 0 ? 0 : 0xff;
 
   int start_full_x;
   int end_full_x;
@@ -468,47 +437,43 @@ static void draw_rect1(FAR struct fb_state_s *state,
 }
 
 static void draw_rect(FAR struct fb_state_s *state,
-                      FAR struct fb_area_s *area, uint32_t color24,
-                      uint16_t color16, uint8_t color8, uint8_t mono)
+                      FAR struct fb_area_s *area, int color)
 {
+#ifdef CONFIG_FB_UPDATE
+  int ret;
+#endif
+
   switch (state->pinfo.bpp)
     {
       case 32:
-        draw_rect32(state, area, color24);
+        draw_rect32(state, area, color);
         break;
 
       case 24:
-        draw_rect24(state, area, color24);
+        draw_rect24(state, area, color);
         break;
 
       case 16:
-        draw_rect16(state, area, color16);
+        draw_rect16(state, area, color);
         break;
 
       case 8:
       default:
-        draw_rect8(state, area, color8);
+        draw_rect8(state, area, color);
         break;
 
       case 1:
-        draw_rect1(state, area, mono);
+        draw_rect1(state, area, color);
         break;
     }
-}
 
-static void present_area(FAR struct fb_state_s *state,
-                         FAR const struct fb_area_s *area)
-{
 #ifdef CONFIG_FB_UPDATE
-  struct fb_area_s update = *area;
-  int ret;
-
   int yoffset = state->act_fbmem == state->fbmem ?
                 0 : state->mem2_yoffset;
-  update.y += yoffset;
+  area->y += yoffset;
 
   ret = ioctl(state->fd, FBIO_UPDATE,
-              (unsigned long)((uintptr_t)&update));
+              (unsigned long)((uintptr_t)area));
   if (ret < 0)
     {
       int errcode = errno;
@@ -534,7 +499,6 @@ static void present_area(FAR struct fb_state_s *state,
 int main(int argc, FAR char *argv[])
 {
   FAR const char *fbdev = g_default_fbdev;
-  int pattern = PATTERN_RECTANGLES;
   struct fb_state_s state;
   struct fb_area_s area;
   int nsteps;
@@ -546,43 +510,20 @@ int main(int argc, FAR char *argv[])
   int x;
   int y;
   int ret;
-  int opt;
 
-  while ((opt = getopt(argc, argv, "p:")) != ERROR)
+  /* There is a single required argument:  The path to the framebuffer
+   * driver.
+   */
+
+  if (argc == 2)
     {
-      switch (opt)
-        {
-          case 'p':
-            if (strcmp(optarg, "rectangles") == 0)
-              {
-                pattern = PATTERN_RECTANGLES;
-              }
-            else if (strcmp(optarg, "smpte") == 0)
-              {
-                pattern = PATTERN_SMPTE;
-              }
-            else
-              {
-                fprintf(stderr, "ERROR: Unknown pattern: %s\n", optarg);
-                goto usage;
-              }
-
-            break;
-
-          default:
-            goto usage;
-        }
+      fbdev = argv[1];
     }
-
-  if (optind < argc)
+  else if (argc != 1)
     {
-      fbdev = argv[optind++];
-    }
-
-  if (optind < argc)
-    {
-      fprintf(stderr, "ERROR: Too many framebuffer paths\n");
-      goto usage;
+      fprintf(stderr, "ERROR: Single argument required\n");
+      fprintf(stderr, "USAGE: %s [<fb-driver-path>]\n", argv[0]);
+      return EXIT_FAILURE;
     }
 
   /* Open the framebuffer driver */
@@ -711,64 +652,38 @@ int main(int argc, FAR char *argv[])
         }
     }
 
-  /* Draw the selected pattern */
+  /* Draw some rectangles */
 
   state.act_fbmem = state.fbmem;
-  if (pattern == PATTERN_SMPTE)
+  nsteps = 2 * (NCOLORS - 1) + 1;
+  xstep  = state.vinfo.xres / nsteps;
+  ystep  = state.vinfo.yres / nsteps;
+  width  = state.vinfo.xres;
+  height = state.vinfo.yres;
+
+  for (x = 0, y = 0, color = 0;
+       color < NCOLORS;
+       x += xstep, y += ystep, color++)
     {
-      for (color = 0; color < NSMPTECOLORS; color++)
+      area.x = x;
+      area.y = y;
+      area.w = width;
+      area.h = height;
+
+      printf("%2d: (%3d,%3d) (%3d,%3d)\n",
+             color, area.x, area.y, area.w, area.h);
+
+      draw_rect(&state, &area, color);
+      usleep(500 * 1000);
+
+      width  -= (2 * xstep);
+      height -= (2 * ystep);
+
+      /* double buffer mode */
+
+      if (state.pinfo.yres_virtual == (state.vinfo.yres * 2))
         {
-          area.x = color * state.vinfo.xres / NSMPTECOLORS;
-          area.y = 0;
-          area.w = (color + 1) * state.vinfo.xres / NSMPTECOLORS -
-                   area.x;
-          area.h = state.vinfo.yres;
-
-          draw_rect(&state, &area, g_smpte_rgb24[color],
-                    g_smpte_rgb16[color], g_smpte_rgb8[color],
-                    g_smpte_mono[color]);
-        }
-
-      area.x = 0;
-      area.y = 0;
-      area.w = state.vinfo.xres;
-      area.h = state.vinfo.yres;
-      present_area(&state, &area);
-    }
-  else
-    {
-      nsteps = 2 * (NRECTCOLORS - 1) + 1;
-      xstep  = state.vinfo.xres / nsteps;
-      ystep  = state.vinfo.yres / nsteps;
-      width  = state.vinfo.xres;
-      height = state.vinfo.yres;
-
-      for (x = 0, y = 0, color = 0;
-           color < NRECTCOLORS;
-           x += xstep, y += ystep, color++)
-        {
-          area.x = x;
-          area.y = y;
-          area.w = width;
-          area.h = height;
-
-          printf("%2d: (%3d,%3d) (%3d,%3d)\n",
-                 color, area.x, area.y, area.w, area.h);
-
-          draw_rect(&state, &area, g_rgb24[color],
-                    g_rgb16[color], g_rgb8[color], color & 1);
-          present_area(&state, &area);
-          usleep(500 * 1000);
-
-          width  -= (2 * xstep);
-          height -= (2 * ystep);
-
-          /* double buffer mode */
-
-          if (state.pinfo.yres_virtual == (state.vinfo.yres * 2))
-            {
-              sync_area(&state);
-            }
+          sync_area(&state);
         }
     }
 
@@ -778,10 +693,4 @@ out:
   munmap(state.fbmem, state.pinfo.fblen);
   close(state.fd);
   return ret;
-
-usage:
-  fprintf(stderr,
-          "USAGE: %s [-p rectangles|smpte] [<fb-driver-path>]\n",
-          argv[0]);
-  return EXIT_FAILURE;
 }
