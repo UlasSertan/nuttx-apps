@@ -162,9 +162,9 @@ static int copy_partition(int from, int where, struct nxboot_state *state,
     }
 
 #ifdef CONFIG_NXBOOT_PRINTF_PROGRESS_PERCENT
-  total_size = remain * 100;
+  total_size = remain;
 #endif
-  blocksize = MAX(info_from.blocksize, info_where.blocksize);
+  blocksize = info_where.blocksize;
 
   buf = malloc(blocksize);
   if (!buf)
@@ -227,7 +227,7 @@ static int copy_partition(int from, int where, struct nxboot_state *state,
         {
 #ifdef CONFIG_NXBOOT_PRINTF_PROGRESS_PERCENT
           nxboot_progress(nxboot_progress_percent,
-                          ((total_size - remain) * 100) / total_size);
+                          100 - ((100 * remain) / total_size));
 #else
           nxboot_progress(nxboot_progress_dot);
 #endif
@@ -313,6 +313,8 @@ static enum nxboot_update_type
           nxboot_progress(nxboot_progress_end);
           return NXBOOT_UPDATE_TYPE_UPDATE;
         }
+
+        flash_partition_erase_first_sector(update);
     }
 
   nxboot_progress(nxboot_progress_end);
@@ -415,6 +417,7 @@ static int perform_update(struct nxboot_state *state, bool check_only)
           syslog(LOG_INFO, "Creating recovery image.\n");
           nxboot_progress(nxboot_progress_start, recovery_create);
           copy_partition(primary, recovery, state, false);
+          flash_partition_flush(recovery);
           nxboot_progress(nxboot_progress_end);
           nxboot_progress(nxboot_progress_start, validate_recovery);
           successful = validate_image(recovery);
@@ -442,6 +445,8 @@ static int perform_update(struct nxboot_state *state, bool check_only)
           nxboot_progress(nxboot_progress_start, update_from_update);
           if (copy_partition(update, primary, state, true) >= 0)
             {
+              flash_partition_flush(primary);
+
               /* Erase the first sector of update partition. This marks the
                * partition as updated so we don't end up in an update loop.
                * The sector is written back again during the image
@@ -643,12 +648,14 @@ int nxboot_get_state(struct nxboot_state *state)
   else if (IS_INTERNAL_MAGIC(primary_header.magic))
     {
       recovery_pointer = primary_header.magic & NXBOOT_RECOVERY_PTR_MASK;
-      if (recovery_pointer == NXBOOT_SECONDARY_SLOT_NUM)
+      if (recovery_pointer == NXBOOT_SECONDARY_SLOT_NUM &&
+          IS_INTERNAL_MAGIC(secondary_header.magic))
         {
           state->primary_confirmed =
             primary_header.crc == secondary_header.crc;
         }
-      else if (recovery_pointer == NXBOOT_TERTIARY_SLOT_NUM)
+      else if (recovery_pointer == NXBOOT_TERTIARY_SLOT_NUM &&
+               IS_INTERNAL_MAGIC(tertiary_header.magic))
         {
           state->primary_confirmed =
             primary_header.crc == tertiary_header.crc;
@@ -880,7 +887,6 @@ int nxboot_perform_update(bool check_only)
   int ret;
   int primary;
   struct nxboot_state state;
-  struct nxboot_img_header header;
 
   ret = nxboot_get_state(&state);
   if (ret < 0)
@@ -904,9 +910,9 @@ int nxboot_perform_update(bool check_only)
         }
     }
 
-  /* Check whether there is a valid image in the primary slot. This just
-   * checks whether the header is valid, but does not calculate the CRC
-   * of the image as this would prolong the boot process.
+  /* Check whether there is a valid image in the primary slot. Validates
+   * both the header and the full image CRC to ensure integrity before
+   * booting.
    */
 
   primary = flash_partition_open(CONFIG_NXBOOT_PRIMARY_SLOT_PATH);
@@ -915,8 +921,7 @@ int nxboot_perform_update(bool check_only)
       return ERROR;
     }
 
-  get_image_header(primary, &header);
-  if (!validate_image_header(&header))
+  if (!validate_image(primary))
     {
       ret = ERROR;
     }

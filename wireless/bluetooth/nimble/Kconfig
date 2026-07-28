@@ -15,7 +15,7 @@ if NIMBLE
 
 config NIMBLE_REF
 	string "Version"
-	default "fb15c844542e812ceb49ab5ac8502dc93c167b90"
+	default "b6831813cfe6da9b25c8be7136b40ce060bf9710"
 	---help---
 		Git ref name to use when downloading from NimBLE repo
 
@@ -218,6 +218,18 @@ config NIMBLE_MSYS_2_BLOCK_COUNT
 config NIMBLE_MSYS_2_BLOCK_SIZE
 	int "NimBLE MSYS_2 block size"
 	default 0
+
+config NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT
+	int "NimBLE transport ACL buffer count (controller to host)"
+	default 10
+	---help---
+		Number of ACL buffers in the transport pool.
+
+config NIMBLE_TRANSPORT_ACL_FROM_HS_COUNT
+	int "NimBLE transport ACL buffer count (host to controller)"
+	default 10
+	---help---
+		Number of ACL buffers in the transport pool.
 
 endmenu # "NimBLE memory configuration"
 

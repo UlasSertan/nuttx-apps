@@ -25,6 +25,8 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/sched.h>
+#include <nuttx/vt100.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,6 +37,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <signal.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/sysinfo.h>
 #include <sys/param.h>
@@ -99,7 +102,8 @@ struct nsh_taskstatus_s
   FAR const char *td_sigmask;      /* Signal mask */
 #endif
   FAR char       *td_cmdline;      /* Command line */
-  int             td_pid;          /* Task ID */
+  int             td_tid;          /* Task ID */
+  int             td_ppid;         /* Parent task ID */
 #ifdef NSH_HAVE_CPULOAD
   FAR const char *td_cpuload;      /* CPU load */
 #endif
@@ -141,6 +145,7 @@ static const char g_scheduler[] = "Scheduler:";
 #ifndef CONFIG_NSH_DISABLE_PSSIGMASK
 static const char g_sigmask[]   = "SigMask:";
 #endif
+static const char g_ppid[]      = "Parent:";
 #  ifdef PS_SHOW_HEAPSIZE
 static const char g_heapsize[]  = "AllocSize:";
 #  endif /* PS_SHOW_HEAPSIZE */
@@ -257,6 +262,28 @@ static void nsh_parse_statusline(FAR char *line,
     }
 #endif
 }
+
+static void nsh_parse_gstatusline(FAR char *line,
+                                  FAR struct nsh_taskstatus_s *status)
+{
+  /* Parse the group status.
+   *
+   *   Format:
+   *
+   *            111111111122222222223
+   *   123456789012345678901234567890
+   *   Main task:  nnnnn              PID
+   *   Parent:     nnnnn              Parent PID
+   *   Flags:      0x**               Group flags, See GROUP_FLAG_*
+   *   Members:    nnnn...            Count of members
+   *   Member IDs: nnnnn,nnnnn,...    List of members{PID0, PID1, ...)
+   */
+
+  if (strncmp(line, g_ppid, strlen(g_ppid)) == 0)
+    {
+      status->td_ppid = atoi(&line[12]);
+    }
+}
 #endif
 
 /****************************************************************************
@@ -354,7 +381,8 @@ static int ps_record(FAR struct nsh_vtbl_s *vtbl, FAR const char *dirpath,
   status->td_sigmask = "";
 #endif
   status->td_cmdline = "";
-  status->td_pid = atoi(entryp->d_name);
+  status->td_tid = atoi(entryp->d_name);
+  status->td_ppid = INVALID_PROCESS_ID;
 #ifdef NSH_HAVE_CPULOAD
   status->td_cpuload = "";
 #endif
@@ -391,6 +419,39 @@ static int ps_record(FAR struct nsh_vtbl_s *vtbl, FAR const char *dirpath,
           /* Parse the current line */
 
           nsh_parse_statusline(line, status);
+        }
+      while (nextline != NULL);
+    }
+
+  ret = ps_readprocfs(vtbl, "group/status", dirpath, entryp, status);
+  if (ret >= 0)
+    {
+      /* Parse the group status. */
+
+      nextline = status->td_buf + status->td_bufpos;
+      do
+        {
+          /* Find the beginning of the next line and NUL-terminate the
+           * current line.
+           */
+
+          line = nextline;
+          for (nextline++;
+               *nextline != '\n' && *nextline != '\0';
+               nextline++);
+
+          if (*nextline == '\n')
+            {
+              *nextline++ = '\0';
+            }
+          else
+            {
+              nextline = NULL;
+            }
+
+          /* Parse the current line */
+
+          nsh_parse_gstatusline(line, status);
         }
       while (nextline != NULL);
     }
@@ -553,7 +614,7 @@ static void ps_title(FAR struct nsh_vtbl_s *vtbl, bool heap)
 #endif
 
   nsh_output(vtbl,
-             "%5s %5s "
+             "%5s %5s %5s "
 #ifdef CONFIG_SMP
               "%3s "
 #endif
@@ -574,7 +635,7 @@ static void ps_title(FAR struct nsh_vtbl_s *vtbl, bool heap)
               "%6s "
 #endif
               "%s\n"
-              , "PID", "GROUP"
+              , "TID", "PID", "PPID"
 #ifdef CONFIG_SMP
               , "CPU"
 #endif
@@ -620,7 +681,7 @@ static void ps_output(FAR struct nsh_vtbl_s *vtbl, bool heap,
 #endif
 
   nsh_output(vtbl,
-             "%5d %5s "
+             "%5d %5s %5d "
 #ifdef CONFIG_SMP
              "%3s "
 #endif
@@ -641,7 +702,7 @@ static void ps_output(FAR struct nsh_vtbl_s *vtbl, bool heap,
              "%5s "
 #endif
              "%s\n"
-           , status->td_pid, status->td_groupid
+           , status->td_tid, status->td_groupid, status->td_ppid
 #ifdef CONFIG_SMP
            , status->td_cpu
 #endif
@@ -814,6 +875,7 @@ static int top_cmpcpuload(FAR const void *item1, FAR const void *item2)
     }
 }
 
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
 /****************************************************************************
  * Name: top_exit
  ****************************************************************************/
@@ -821,6 +883,108 @@ static int top_cmpcpuload(FAR const void *item1, FAR const void *item2)
 static void top_exit(int signo, FAR siginfo_t *siginfo, FAR void *context)
 {
   *(FAR bool *)siginfo->si_user = true;
+}
+#endif /* CONFIG_ENABLE_ALL_SIGNALS */
+
+/****************************************************************************
+ * Name: top_state_is_running
+ ****************************************************************************/
+
+static bool top_state_is_running(FAR const char *state)
+{
+  return strncmp(state, "Running", 7) == 0 ||
+         strncmp(state, "Ready", 5) == 0 ||
+         strncmp(state, "Pending", 7) == 0;
+}
+
+/****************************************************************************
+ * Name: top_summary
+ *
+ * Description:
+ *   Print a Linux-top-like summary header: uptime, task counts, CPU
+ *   busy/idle and memory usage.  Lines end with an erase-to-eol so the
+ *   screen can be refreshed in place.
+ *
+ ****************************************************************************/
+
+static void top_summary(FAR struct nsh_vtbl_s *vtbl,
+                        FAR struct nsh_topstatus_s *topstatus)
+{
+  struct sysinfo info;
+  unsigned long uptime;
+  unsigned long busy;
+  size_t running = 0;
+  size_t i;
+
+  for (i = 0; i < topstatus->index; i++)
+    {
+      if (top_state_is_running(topstatus->status[i]->td_state))
+        {
+          running++;
+        }
+    }
+
+  sysinfo(&info);
+  uptime = info.uptime;
+
+  if (uptime >= 86400)
+    {
+      nsh_output(vtbl, VT100_STR_CLEAREOL
+                 "top - up %lud %02lu:%02lu:%02lu\n",
+                 uptime / 86400, (uptime % 86400) / 3600,
+                 (uptime % 3600) / 60, uptime % 60);
+    }
+  else
+    {
+      nsh_output(vtbl, VT100_STR_CLEAREOL "top - up %02lu:%02lu:%02lu\n",
+                 uptime / 3600, (uptime % 3600) / 60, uptime % 60);
+    }
+
+  nsh_output(vtbl, VT100_STR_CLEAREOL
+             "Tasks: %zu total, %zu running, %zu sleeping\n",
+             topstatus->index, running, topstatus->index - running);
+
+  busy = (info.loads[0] * 1000) >> SI_LOAD_SHIFT;
+  nsh_output(vtbl, VT100_STR_CLEAREOL
+             "%%Cpu(s): %2lu.%lu busy, %2lu.%lu idle\n",
+             busy / 10, busy % 10,
+             (1000 - busy) / 10, (1000 - busy) % 10);
+
+  nsh_output(vtbl, VT100_STR_CLEAREOL
+             "Mem : %8lu total, %8lu used, %8lu free\n",
+             info.totalram, info.totalram - info.freeram, info.freeram);
+
+  nsh_output(vtbl, VT100_STR_CLEAREOL "\n");
+}
+
+/****************************************************************************
+ * Name: top_wait_key
+ *
+ * Description:
+ *   Sleep for the update interval, returning true if the user asked to
+ *   quit (q, ESC or Ctrl-C read from stdin).
+ *
+ ****************************************************************************/
+
+static bool top_wait_key(int delay)
+{
+  struct pollfd fds;
+
+  fds.fd = STDIN_FILENO;
+  fds.events = POLLIN;
+
+  if (poll(&fds, 1, delay * 1000) > 0)
+    {
+      char c;
+
+      if (read(STDIN_FILENO, &c, 1) == 1 &&
+          (c == 'q' || c == 0x1b || c == 0x03))
+        {
+          return true;
+        }
+    }
+
+  return false;
 }
 
 #endif
@@ -934,7 +1098,8 @@ int cmd_pidof(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
  * Name: cmd_kill
  ****************************************************************************/
 
-#ifndef CONFIG_NSH_DISABLE_KILL
+#if !defined(CONFIG_NSH_DISABLE_KILL) && \
+    !defined(CONFIG_DISABLE_ALL_SIGNALS)
 int cmd_kill(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   FAR char *ptr;
@@ -1037,7 +1202,8 @@ invalid_arg:
  * Name: cmd_pkill
  ****************************************************************************/
 
-#if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_NSH_DISABLE_PKILL)
+#if defined(CONFIG_FS_PROCFS) && !defined(CONFIG_NSH_DISABLE_PKILL) && \
+    !defined(CONFIG_DISABLE_ALL_SIGNALS)
 int cmd_pkill(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   FAR const char *name;
@@ -1138,7 +1304,8 @@ invalid_arg:
  * Name: cmd_sleep
  ****************************************************************************/
 
-#ifndef CONFIG_NSH_DISABLE_SLEEP
+#if !defined(CONFIG_NSH_DISABLE_SLEEP) && \
+    !defined(CONFIG_DISABLE_ALL_SIGNALS)
 int cmd_sleep(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   UNUSED(argc);
@@ -1161,8 +1328,8 @@ int cmd_sleep(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 /****************************************************************************
  * Name: cmd_usleep
  ****************************************************************************/
-
-#ifndef CONFIG_NSH_DISABLE_USLEEP
+#if !defined(CONFIG_NSH_DISABLE_USLEEP) && \
+    !defined(CONFIG_DISABLE_ALL_SIGNALS)
 int cmd_usleep(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
 {
   UNUSED(argc);
@@ -1298,7 +1465,9 @@ int cmd_top(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
   FAR char *pidlist = NULL;
   size_t num = SIZE_MAX;
   size_t i;
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
   struct sigaction act;
+#endif
   bool quit = false;
   int delay = 3;
   int ret = 0;
@@ -1334,6 +1503,7 @@ int cmd_top(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
         }
     }
 
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
   act.sa_user = &quit;
   act.sa_sigaction = top_exit;
   sigemptyset(&act.sa_mask);
@@ -1343,17 +1513,19 @@ int cmd_top(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
       nsh_error(vtbl, g_fmtcmdfailed, "top", "sigaction", NSH_ERRNO);
       return ERROR;
     }
+#endif
 
   if (vtbl->isctty)
     {
       tc = nsh_ioctl(vtbl, TIOCSCTTY, getpid());
     }
 
+  nsh_output(vtbl, VT100_STR_CLEARSCREEN);
+
   while (!quit)
     {
       topstatus.index = 0;
-      nsh_output(vtbl, "\033[2J\033[1;1H");
-      ps_title(vtbl, topstatus.heap);
+      nsh_output(vtbl, VT100_STR_CURSORHOME);
 
       if (pidlist)
         {
@@ -1387,17 +1559,29 @@ int cmd_top(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
       qsort(topstatus.status, topstatus.index,
             sizeof(topstatus.status[0]), top_cmpcpuload);
 
+      top_summary(vtbl, &topstatus);
+
+      nsh_output(vtbl, VT100_STR_CLEAREOL VT100_STR_BOLD);
+      ps_title(vtbl, topstatus.heap);
+      nsh_output(vtbl, VT100_STR_MODESOFF);
+
       for (i = 0; i < MIN(topstatus.index, num); i++)
         {
+          nsh_output(vtbl, VT100_STR_CLEAREOL);
           ps_output(vtbl, topstatus.heap, topstatus.status[i]);
         }
 
       if (vtbl->isctty && tc == 0)
         {
-          nsh_output(vtbl, "use Ctrl+c' to quit\n");
+          nsh_output(vtbl, VT100_STR_CLEAREOL "use 'q' or Ctrl+c to quit\n");
         }
 
-      sleep(delay);
+      nsh_output(vtbl, VT100_STR_CLEAREOS);
+
+      if (top_wait_key(delay))
+        {
+          break;
+        }
     }
 
   if (topstatus.status != NULL)

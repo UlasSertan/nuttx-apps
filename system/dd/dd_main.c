@@ -24,14 +24,16 @@
  * Included Files
  ****************************************************************************/
 
-#if defined(__NuttX__)
+#ifdef __NuttX__
 #include <nuttx/config.h>
 #endif
 
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include <debug.h>
+#ifdef __NuttX__
+#include <nuttx/debug.h>
+#endif
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -60,10 +62,18 @@
 #define CONFIG_SYSTEM_DD_PROGNAME "dd"
 #endif
 #if !defined(__NuttX__)
-#define FAR
-#define NSEC_PER_USEC 1000
-#define USEC_PER_SEC 1000000
-#define NSEC_PER_SEC 1000000000
+#  ifndef FAR
+#    define FAR
+#  endif
+#  ifndef NSEC_PER_USEC
+#    define NSEC_PER_USEC 1000
+#  endif
+#  ifndef USEC_PER_SEC
+#    define USEC_PER_SEC 1000000
+#  endif
+#  ifndef NSEC_PER_SEC
+#    define NSEC_PER_SEC 1000000000
+#  endif
 #endif
 
 #define g_dd CONFIG_SYSTEM_DD_PROGNAME
@@ -79,7 +89,7 @@ struct dd_s
   uint32_t     nsectors;   /* Number of sectors to transfer */
   uint32_t     skip;       /* The number of sectors skipped on input */
   uint32_t     seek;       /* The number of sectors seeked on output */
-  int          oflags;     /* The open flags on output deivce */
+  int          oflags;     /* The open flags on output device */
   bool         eof;        /* true: The end of the input or output file has been hit */
   size_t       sectsize;   /* Size of one sector */
   size_t       nbytes;     /* Number of valid bytes in the buffer */
@@ -108,7 +118,8 @@ static int dd_write(FAR struct dd_s *dd)
       nbytes = write(dd->outfd, buffer, dd->nbytes - written);
       if (nbytes < 0)
         {
-          printf("%s: failed to write: %s\n", g_dd, strerror(errno));
+          fprintf(stderr, "%s: failed to write: %s\n", g_dd,
+              strerror(errno));
           return ERROR;
         }
 
@@ -140,7 +151,7 @@ static int dd_read(FAR struct dd_s *dd)
               continue;
             }
 
-          printf("%s: failed to read: %s\n", g_dd, strerror(errno));
+          fprintf(stderr, "%s: failed to read: %s\n", g_dd, strerror(errno));
           return ERROR;
         }
 
@@ -172,7 +183,8 @@ static inline int dd_infopen(FAR const char *name, FAR struct dd_s *dd)
   dd->infd = open(name, O_RDONLY);
   if (dd->infd < 0)
     {
-      printf("%s: failed to open '%s': %s\n", g_dd, name, strerror(errno));
+      fprintf(stderr, "%s: failed to open '%s': %s\n", g_dd, name,
+          strerror(errno));
       return ERROR;
     }
 
@@ -194,7 +206,8 @@ static inline int dd_outfopen(FAR const char *name, FAR struct dd_s *dd)
   dd->outfd = open(name, dd->oflags, 0644);
   if (dd->outfd < 0)
     {
-      printf("%s: failed to open '%s': %s\n", g_dd, name, strerror(errno));
+      fprintf(stderr, "%s: failed to open '%s': %s\n", g_dd, name,
+          strerror(errno));
       return ERROR;
     }
 
@@ -210,7 +223,8 @@ static int dd_verify(FAR struct dd_s *dd)
   ret = lseek(dd->infd, dd->skip ? dd->skip * dd->sectsize : 0, SEEK_SET);
   if (ret < 0)
     {
-      printf("%s: failed to infd lseek: %s\n", g_dd, strerror(errno));
+      fprintf(stderr, "%s: failed to infd lseek: %s\n", g_dd,
+          strerror(errno));
       return ret;
     }
 
@@ -218,7 +232,8 @@ static int dd_verify(FAR struct dd_s *dd)
   ret = lseek(dd->outfd, 0, SEEK_SET);
   if (ret < 0)
     {
-      printf("%s: failed to outfd lseek: %s\n", g_dd, strerror(errno));
+      fprintf(stderr, "%s: failed to outfd lseek: %s\n", g_dd,
+          strerror(errno));
       return ret;
     }
 
@@ -239,18 +254,23 @@ static int dd_verify(FAR struct dd_s *dd)
       ret = read(dd->outfd, buffer, dd->nbytes);
       if (ret != dd->nbytes)
         {
-          printf("%s: failed to outfd read: %d\n",
+          fprintf(stderr, "%s: failed to outfd read: %d\n",
                  g_dd, ret < 0 ? errno : ret);
           break;
         }
 
       if (memcmp(dd->buffer, buffer, dd->nbytes) != 0)
         {
+#ifdef __NuttX__
           char msg[32];
           snprintf(msg, sizeof(msg), "infile sector %d", sector);
           lib_dumpbuffer(msg, dd->buffer, dd->nbytes);
           snprintf(msg, sizeof(msg), "\noutfile sector %d", sector);
           lib_dumpbuffer(msg, buffer, dd->nbytes);
+#else
+          fprintf(stderr, "%s: sector %d differs unexpectedly\n", g_dd,
+              sector);
+#endif
           ret = ERROR;
           break;
         }
@@ -260,7 +280,7 @@ static int dd_verify(FAR struct dd_s *dd)
 
   if (ret < 0)
     {
-      printf("%s: failed to dd verify: %d\n", g_dd, ret);
+      fprintf(stderr, "%s: failed to dd verify: %d\n", g_dd, ret);
     }
 
   free(buffer);
@@ -271,10 +291,10 @@ static int dd_verify(FAR struct dd_s *dd)
  * Name: print_usage
  ****************************************************************************/
 
-static void print_usage(void)
+static void print_usage(FAR FILE *stream)
 {
-  printf("usage:\n");
-  printf("  %s [if=<infile>] [of=<outfile>] [bs=<sectsize>] "
+  fprintf(stream, "usage:\n");
+  fprintf(stream, "  %s [if=<infile>] [of=<outfile>] [bs=<sectsize>] "
          "[count=<sectors>] [skip=<sectors>] [seek=<sectors>] [verify] "
          "[conv=<nocreat,notrunc>]\n", g_dd);
 }
@@ -297,6 +317,7 @@ int main(int argc, FAR char **argv)
   uint32_t sector = 0;
   int ret = ERROR;
   int i;
+  bool show_help = false;
 
   /* Initialize the dd structure */
 
@@ -335,7 +356,7 @@ int main(int argc, FAR char **argv)
         }
       else if (strncmp(argv[i], "verify", 6) == 0)
         {
-          dd.oflags |= O_RDONLY;
+          dd.oflags = (dd.oflags & ~O_ACCMODE) | O_RDWR;
         }
       else if (strncmp(argv[i], "conv=", 5) == 0)
         {
@@ -354,7 +375,7 @@ int main(int argc, FAR char **argv)
                 }
               else
                 {
-                  printf("%s: unknown conversion '%.*s'\n", g_dd,
+                  fprintf(stderr, "%s: unknown conversion '%.*s'\n", g_dd,
                          (int)len, cur);
                   goto errout_with_paths;
                 }
@@ -367,19 +388,33 @@ int main(int argc, FAR char **argv)
               cur = next + 1;
             }
         }
+      else if (strcmp(argv[i], "--help") == 0)
+        {
+          show_help = true;
+        }
       else
         {
-          print_usage();
+          print_usage(stderr);
           goto errout_with_paths;
         }
     }
 
+  /* Help requested? Emit usage hints and exit. */
+
+  if (show_help)
+    {
+      print_usage(stdout);
+      return 0;
+    }
+
   /* If verify enabled, infile and outfile are mandatory */
 
-  if ((dd.oflags & O_RDONLY) && (infile == NULL || outfile == NULL))
+  if ((dd.oflags & O_ACCMODE) == O_RDWR &&
+      (infile == NULL || outfile == NULL))
     {
-      printf("%s: invalid parameters: %s\n", g_dd, strerror(EINVAL));
-      print_usage();
+      fprintf(stderr, "%s: invalid parameters: %s\n", g_dd,
+          strerror(EINVAL));
+      print_usage(stderr);
       goto errout_with_paths;
     }
 
@@ -388,7 +423,7 @@ int main(int argc, FAR char **argv)
   dd.buffer = malloc(dd.sectsize);
   if (!dd.buffer)
     {
-      printf("%s: failed to malloc: %s\n", g_dd, strerror(errno));
+      fprintf(stderr, "%s: failed to malloc: %s\n", g_dd, strerror(errno));
       goto errout_with_paths;
     }
 
@@ -413,7 +448,8 @@ int main(int argc, FAR char **argv)
       ret = lseek(dd.infd, dd.skip * dd.sectsize, SEEK_SET);
       if (ret < 0)
         {
-          printf("%s: failed to lseek: %s\n", g_dd, strerror(errno));
+          fprintf(stderr, "%s: failed to lseek: %s\n", g_dd,
+              strerror(errno));
           ret = ERROR;
           goto errout_with_outf;
         }
@@ -424,7 +460,7 @@ int main(int argc, FAR char **argv)
       ret = lseek(dd.outfd, dd.seek * dd.sectsize, SEEK_SET);
       if (ret < 0)
         {
-          printf("%s: failed to lseek on output: %s\n",
+          fprintf(stderr, "%s: failed to lseek on output: %s\n",
                  g_dd, strerror(errno));
           ret = ERROR;
           goto errout_with_outf;
@@ -473,18 +509,18 @@ int main(int argc, FAR char **argv)
 #ifdef CONFIG_SYSTEM_DD_STATS
   clock_gettime(CLOCK_MONOTONIC, &ts1);
 
-  elapsed  = (((uint64_t)ts1.tv_sec * NSEC_PER_SEC) + ts1.tv_nsec);
-  elapsed -= (((uint64_t)ts0.tv_sec * NSEC_PER_SEC) + ts0.tv_nsec);
+  elapsed  = (ts1.tv_sec * NSEC_PER_SEC) + ts1.tv_nsec;
+  elapsed -= (ts0.tv_sec * NSEC_PER_SEC) + ts0.tv_nsec;
   elapsed /= NSEC_PER_USEC; /* usec */
 
-  printf("%" PRIu64 " bytes (%" PRIu32 " blocks) copied, %u usec, ",
+  fprintf(stderr, "%" PRIu64 " bytes (%" PRIu32 " blocks) copied, %u usec, ",
          total, sector, (unsigned int)elapsed);
-  printf("%u KB/s\n" ,
+  fprintf(stderr, "%u KB/s\n" ,
          (unsigned int)(((double)total / 1024)
          / ((double)elapsed / USEC_PER_SEC)));
 #endif
 
-  if (ret == 0 && (dd.oflags & O_RDONLY) != 0)
+  if (ret == 0 && (dd.oflags & O_ACCMODE) == O_RDWR)
     {
       ret = dd_verify(&dd);
     }
@@ -495,7 +531,8 @@ errout_with_outf:
       dd.outfd = close(dd.outfd);
       if (dd.outfd < 0)
         {
-          printf("%s failed to close outfd:%s\n", g_dd, strerror(errno));
+          fprintf(stderr, "%s failed to close outfd:%s\n", g_dd,
+              strerror(errno));
         }
     }
 
@@ -505,7 +542,8 @@ errout_with_inf:
       dd.infd = close(dd.infd);
       if (dd.infd < 0)
         {
-          printf("%s failed to close infd:%s\n", g_dd, strerror(errno));
+          fprintf(stderr, "%s failed to close infd:%s\n", g_dd,
+              strerror(errno));
         }
     }
 
